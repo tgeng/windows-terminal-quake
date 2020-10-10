@@ -14,30 +14,37 @@ namespace WindowsTerminalQuake
 	{
 		private Process _process => TerminalProcess.Get();
 
-		private readonly List<int> _registeredHotKeys = new List<int>();
+		private readonly HotKeyRegistry _hotKeyRegistry = new HotKeyRegistry();
+		private readonly ActiveWindowManager _activeWindowManager = new ActiveWindowManager();
 
 		public Toggler()
 		{
 			// Hide from taskbar
-			User32.SetWindowLong(_process.MainWindowHandle, User32.GWL_EX_STYLE, (User32.GetWindowLong(_process.MainWindowHandle, User32.GWL_EX_STYLE) | User32.WS_EX_TOOLWINDOW) & ~User32.WS_EX_APPWINDOW);
+			User32.SetWindowLong(_process.MainWindowHandle, User32.GWL_EX_STYLE,
+				(User32.GetWindowLong(_process.MainWindowHandle, User32.GWL_EX_STYLE) | User32.WS_EX_TOOLWINDOW) &
+				~User32.WS_EX_APPWINDOW);
 
 			User32.Rect rect = default;
 			User32.ShowWindow(_process.MainWindowHandle, NCmdShow.MAXIMIZE);
 
 			var isOpen = true;
 
-			// Register hotkeys
+			_hotKeyRegistry.RegisterHotKeys();
 			Settings.Get(s =>
 			{
-				_registeredHotKeys.ForEach(hk => HotKeyManager.UnregisterHotKey(hk));
-				_registeredHotKeys.Clear();
+				_activeWindowManager.ClearEvents();
 
-				s.Hotkeys.ForEach(hk =>
+				_activeWindowManager._events += (title) =>
 				{
-					Log.Information($"Registering hot key {hk.Modifiers} + {hk.Key}");
-					var reg = HotKeyManager.RegisterHotKey(hk.Key, hk.Modifiers);
-					_registeredHotKeys.Add(reg);
-				});
+					if (s.DisableForWindows.Contains(title))
+					{
+						_hotKeyRegistry.UnregisterHotKeys();
+					}
+					else
+					{
+						_hotKeyRegistry.RegisterHotKeys();
+					}
+				};
 			});
 
 			FocusTracker.OnFocusLost += (s, a) =>
@@ -58,7 +65,7 @@ namespace WindowsTerminalQuake
 
 		public void Toggle(bool open, int durationMs)
 		{
-			var stepCount = (int)Math.Max(Math.Ceiling(durationMs / 25f), 1f);
+			var stepCount = (int) Math.Max(Math.Ceiling(durationMs / 25f), 1f);
 			var stepDelayMs = durationMs / stepCount;
 			var screen = GetScreenWithCursor();
 
@@ -102,7 +109,8 @@ namespace WindowsTerminalQuake
 					Task.Delay(TimeSpan.FromMilliseconds(stepDelayMs)).GetAwaiter().GetResult();
 				}
 
-				if (Settings.Instance.VerticalScreenCoverage >= 100 && Settings.Instance.HorizontalScreenCoverage >= 100)
+				if (Settings.Instance.VerticalScreenCoverage >= 100 &&
+				    Settings.Instance.HorizontalScreenCoverage >= 100)
 				{
 					User32.ShowWindow(_process.MainWindowHandle, NCmdShow.MAXIMIZE);
 				}
@@ -114,19 +122,21 @@ namespace WindowsTerminalQuake
 			var bounds = screen.Bounds;
 
 			var scrWidth = bounds.Width;
-			var horWidthPct = (float)Settings.Instance.HorizontalScreenCoverage;
+			var horWidthPct = (float) Settings.Instance.HorizontalScreenCoverage;
 
-			var horWidth = (int)Math.Ceiling(scrWidth / 100f * horWidthPct);
-			var x = (int)Math.Ceiling(scrWidth / 2f - horWidth / 2f);
+			var horWidth = (int) Math.Ceiling(scrWidth / 100f * horWidthPct);
+			var x = (int) Math.Ceiling(scrWidth / 2f - horWidth / 2f);
 
-			bounds.Height = (int)Math.Ceiling((bounds.Height / 100f) * Settings.Instance.VerticalScreenCoverage);
+			bounds.Height = (int) Math.Ceiling((bounds.Height / 100f) * Settings.Instance.VerticalScreenCoverage);
 
-			return new Rectangle(bounds.X + x, bounds.Y + -bounds.Height + (bounds.Height / stepCount * step), horWidth, bounds.Height);
+			return new Rectangle(bounds.X + x, bounds.Y + -bounds.Height + (bounds.Height / stepCount * step), horWidth,
+				bounds.Height);
 		}
 
 		public void Dispose()
 		{
 			ResetTerminal(_process);
+			_activeWindowManager.Dispose();
 		}
 
 		private static Screen GetScreenWithCursor()
@@ -139,7 +149,9 @@ namespace WindowsTerminalQuake
 			var bounds = GetScreenWithCursor().Bounds;
 
 			// Restore taskbar icon
-			User32.SetWindowLong(process.MainWindowHandle, User32.GWL_EX_STYLE, (User32.GetWindowLong(process.MainWindowHandle, User32.GWL_EX_STYLE) | User32.WS_EX_TOOLWINDOW) & User32.WS_EX_APPWINDOW);
+			User32.SetWindowLong(process.MainWindowHandle, User32.GWL_EX_STYLE,
+				(User32.GetWindowLong(process.MainWindowHandle, User32.GWL_EX_STYLE) | User32.WS_EX_TOOLWINDOW) &
+				User32.WS_EX_APPWINDOW);
 
 			// Reset position
 			User32.MoveWindow(process.MainWindowHandle, bounds.X, bounds.Y, bounds.Width, bounds.Height, true);
